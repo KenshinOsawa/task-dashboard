@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>部署別タスク管理グラフ</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    body {
+      font-family: Helvetica, "Segoe UI", Roboto, Arial, sans-serif;
+      background-color: #f9f9f9;
+      color: #1c1c1e;
+      margin: 40px;
+    }
+
+    h2 {
+      font-weight: 600;
+      font-size: 24px;
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .input-area {
+      background: white;
+      border-radius: 12px;
+      padding: 30px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+      max-width: 800px;
+      margin: 0 auto 40px auto;
+    }
+
+    select, textarea, button, input[type="text"] {
+      font-family: inherit;
+      font-size: 18px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 16px;
+    }
+
+    .task-input-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .task-input-row input[type="text"] {
+      flex: 1;
+      font-size: 18px;
+    }
+
+    .task-input-row button.add-btn {
+      width: 44px;
+      height: 44px;
+      font-size: 24px;
+      padding: 0;
+      border-radius: 50%;
+      background-color: #007aff;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+
+    button.submit-btn {
+      background-color: #007aff;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      width: 100%;
+      font-size: 18px;
+    }
+
+    button.submit-btn:hover {
+      background-color: #005bb5;
+    }
+
+    canvas {
+      display: block;
+      max-width: 400px;
+      max-height: 400px;
+      margin: 0 auto;
+    }
+
+    .task-list {
+      font-size: 16px;
+      margin-top: 20px;
+    }
+
+    .task-list ul {
+      list-style-type: none;
+      padding-left: 0;
+    }
+
+    .task-list li {
+      margin: 6px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .task-list button {
+      width: auto;
+      padding: 6px 10px;
+      font-size: 14px;
+      background-color: #ff3b30;
+      border: none;
+      border-radius: 6px;
+      color: white;
+      margin-left: 10px;
+    }
+
+    .task-list button:hover {
+      background-color: #c62828;
+    }
+  </style>
+</head>
+<body>
+  <h2>部署ごとのタスク配分</h2>
+
+  <div class="input-area">
+    <h3>タスクの追加</h3>
+    <label for="departmentSelect">部署を選択:</label>
+    <select id="departmentSelect"></select>
+
+    <div id="taskInputs">
+      <div class="task-input-row">
+        <input type="text" class="task-field" placeholder="例: 財務申請">
+        <button class="add-btn" onclick="addTaskInput()">＋</button>
+      </div>
+    </div>
+
+    <button class="submit-btn" onclick="addTasks()">タスクを追加</button>
+
+    <div class="task-list" id="taskList"></div>
+  </div>
+
+  <canvas id="taskChart"></canvas>
+
+  <script>
+    const departmentLabels = [
+      'OnStage', 'OffStage', 'Branding', 'Logistics', 'Presi', 'Staff', 'Partner', 'Finance'
+    ];
+
+    const taskDetails = Object.fromEntries(departmentLabels.map(label => [label, []]));
+
+    function updateTaskCounts() {
+      return departmentLabels.map(label => taskDetails[label]?.length || 0);
+    }
+
+    function populateDepartmentSelect() {
+      const select = document.getElementById('departmentSelect');
+      departmentLabels.forEach(label => {
+        const option = document.createElement('option');
+        option.value = label;
+        option.textContent = label;
+        select.appendChild(option);
+      });
+    }
+
+    function addTaskInput() {
+      const container = document.getElementById('taskInputs');
+      const currentFields = container.querySelectorAll('.task-field');
+      if (currentFields.length >= 8) return;
+
+      const row = document.createElement('div');
+      row.className = 'task-input-row';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'task-field';
+      input.placeholder = '例: MTG日調';
+
+      row.appendChild(input);
+      container.appendChild(row);
+    }
+
+    function addTasks() {
+      const dept = document.getElementById('departmentSelect').value;
+      const fields = document.querySelectorAll('.task-field');
+      const newTasks = Array.from(fields).map(f => f.value.trim()).filter(t => t);
+      if (newTasks.length > 0) {
+        taskDetails[dept] = (taskDetails[dept] || []).concat(newTasks);
+        saveTasksToSheet(dept, newTasks);
+        updateChartAndTaskList();
+        document.getElementById('taskInputs').innerHTML = '';
+        addTaskInput();
+      }
+    }
+
+    function saveTasksToSheet(dept, tasks) {
+      fetch('https://script.google.com/macros/s/AKfycbwMiuiTcwXuxxAG_lqyJpiLiQ2AXIeWYbeJ49nsvyi7kN5O7sw6g7dNzC9RtxLuiAQi/exec', {
+        method: 'POST',
+        body: JSON.stringify({
+          department: dept,
+          tasks: tasks
+        }),
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        console.log('保存完了:', data);
+      })
+      .catch(err => {
+        console.error('保存エラー:', err);
+      });
+    }
+
+    function removeTask(dept, index) {
+      if (taskDetails[dept]) {
+        taskDetails[dept].splice(index, 1);
+        updateChartAndTaskList();
+      }
+    }
+
+    function updateChartAndTaskList() {
+      taskChart.data.datasets[0].data = updateTaskCounts();
+      taskChart.update();
+      renderTaskList();
+    }
+
+    function renderTaskList() {
+      const dept = document.getElementById('departmentSelect').value;
+      const container = document.getElementById('taskList');
+      container.innerHTML = '';
+      if (!dept || !taskDetails[dept]) return;
+
+      const ul = document.createElement('ul');
+      taskDetails[dept].forEach((task, index) => {
+        const li = document.createElement('li');
+        li.textContent = task;
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '削除';
+        delBtn.onclick = () => removeTask(dept, index);
+        li.appendChild(delBtn);
+        ul.appendChild(li);
+      });
+      container.appendChild(ul);
+    }
+
+    document.getElementById('departmentSelect').addEventListener('change', renderTaskList);
+
+    populateDepartmentSelect();
+    addTaskInput();
+
+    let chartCtx = document.getElementById('taskChart').getContext('2d');
+    let taskChart = new window.Chart(chartCtx, {
+      type: 'doughnut',
+      data: {
+        labels: departmentLabels,
+        datasets: [{
+          label: '部署別タスク数',
+          data: updateTaskCounts(),
+          backgroundColor: [
+            'rgba(255, 99, 132, 0.6)',
+            'rgba(54, 162, 235, 0.6)',
+            'rgba(255, 206, 86, 0.6)',
+            'rgba(75, 192, 192, 0.6)',
+            'rgba(153, 102, 255, 0.6)',
+            'rgba(255, 159, 64, 0.6)',
+            'rgba(100, 200, 100, 0.6)',
+            'rgba(200, 100, 255, 0.6)'
+          ],
+          borderColor: 'rgba(255, 255, 255, 1)',
+          borderWidth: 2,
+          hoverOffset: 16
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: function(context) {
+                const dept = context.label;
+                const tasks = taskDetails[dept] || [];
+                return [`${dept}のタスク数: ${tasks.length}`]
+                  .concat(tasks.map(task => `- ${task}`));
+              }
+            }
+          },
+          legend: {
+            position: 'bottom',
+            labels: {
+              font: {
+                family: 'Helvetica, "Segoe UI", Roboto, Arial, sans-serif',
+                size: 14
+              }
+            }
+          }
+        },
+        animation: {
+          animateRotate: true,
+          animateScale: true
+        },
+        hover: {
+          mode: 'nearest',
+          onHover: function(event, chartElement) {
+            event.native.target.style.cursor = chartElement[0] ? 'pointer' : 'default';
+          }
+        }
+      }
+    });
+  </script>
+</body>
+</html>
